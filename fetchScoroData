@@ -1,0 +1,174 @@
+function fetchScoroData() {
+  var companyName = 'peripherydigital';
+  var apiKey = 'ScoroAPI_2d9e9c9f36a0a48'; // Replace with your actual API key
+
+  // Get today's date and format
+  var today = new Date();
+  var sevenDaysAgo = new Date(today.getTime() - (30 * 24 * 60 * 60 * 1000));
+  var fromDate = Utilities.formatDate(sevenDaysAgo, 'UTC', "yyyy-MM-dd");
+  var toDate = Utilities.formatDate(today, 'UTC', "yyyy-MM-dd");
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Aggregate');
+  if (!sheet) {
+    sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet('Aggregate');
+  }
+
+  // Define headers (ensure this only runs once, not on every fetch)
+  if (sheet.getLastRow() === 0) {
+    var headers = [
+      'id', 'doc_no', 'doc_date', 'supplier', 'supplier_id', 'project_name', 'quote_no', 'total_sum',
+      'Media Plan', 'Consolidated Client', 'Retainer / Not', 'source', // Added source indicator
+      'line_id', 'product_id', 'product_name', 'line_sum', 'price', 'amount', 'discount', 'vat', 'comment'
+    ];
+    sheet.appendRow(headers);
+  }
+
+  // Fetch and update invoices
+  fetchAndProcessScoroData(sheet, 'invoice', companyName, apiKey, fromDate, toDate);
+
+  // Fetch and update purchase orders
+  fetchAndProcessScoroData(sheet, 'purchaseOrder', companyName, apiKey, fromDate, toDate);
+}
+
+function fetchAndProcessScoroData(sheet, source, companyName, apiKey, fromDate, toDate) {
+  var page = 1;
+  var perPage = 50;
+  var moreData = true;
+
+  while (moreData) {
+    moreData = fetchScoroDataFromUrl(sheet, source, companyName, apiKey, fromDate, toDate, page, perPage);
+    page++;
+  }
+}
+
+function fetchScoroDataFromUrl(sheet, source, companyName, apiKey, fromDate, toDate, page, perPage) {
+  var url;
+  if (source === 'invoice') {
+    url = 'https://' + companyName + '.scoro.com/api/v2/invoices/list';
+  } else if (source === 'purchaseOrder') {
+    url = 'https://' + companyName + '.scoro.com/api/v2/purchaseOrders/list';
+  } else {
+    throw new Error('Invalid source type: ' + source);
+  }
+
+  var requestPayload = {
+    "apiKey": apiKey,
+    "lang": "eng",
+    "company_account_id": companyName,
+    "filter": {
+      "created_date": {
+        "from_date": fromDate,
+        "to_date": toDate
+      }
+    },
+    "per_page": perPage,
+    "page": page,
+    "detailed_response": true
+  };
+
+  var options = {
+    'method': 'post',
+    'contentType': 'application/json',
+    'payload': JSON.stringify(requestPayload)
+  };
+
+  try {
+    var response = UrlFetchApp.fetch(url, options);
+    var data = JSON.parse(response.getContentText());
+
+    if (data && data.data && data.data.length > 0) {
+      var items = data.data;
+
+      items.forEach(function(item) {
+        var baseRow = [
+          item.id, item.no, item.date,
+          source === 'invoice' ? item.client_name : item.company_name,
+          source === 'invoice' ? item.client_id : item.company_id,
+          item.project_name,
+          source === 'invoice' ? extractQuoteNumber(item.quote_id) : item.quote_id,
+          item.sum,
+          extractCustomField(item.custom_fields, 'c_mediaplan'),
+          extractCustomField(item.custom_fields, 'c_consolidatedclient'),
+          extractCustomField(item.custom_fields, 'c_retainernot'),
+          source
+        ];
+
+        if (item.lines) {
+          parseLinesColumn(item.lines, baseRow, sheet);
+        } else {
+          insertOrUpdateRow(sheet, baseRow.concat(['']));
+        }
+      });
+
+      return true; // More data to fetch
+    } else {
+      Logger.log('No data found for ' + url);
+      return false; // No more data
+    }
+  } catch (e) {
+    Logger.log('Error fetching data from ' + url + ': ' + e.toString());
+    return false; // Stop fetching on error
+  }
+}
+
+function parseLinesColumn(linesData, baseRow, sheet) {
+  try {
+    var parsedData = Array.isArray(linesData) ? linesData : JSON.parse(linesData);
+
+    parsedData.forEach(function(item) {
+      var row = [
+        item.id, item.product_id, item.product_name, item.sum, item.price, item.amount, item.discount, item.vat, item.comment
+      ];
+
+      var finalRow = baseRow.concat(row);
+      insertOrUpdateRow(sheet, finalRow);
+    });
+
+  } catch (e) {
+    Logger.log('Error parsing lines column: ' + e.toString());
+  }
+}
+
+function insertOrUpdateRow(sheet, rowData) {
+  var id = rowData[0]; // Assuming 'id' is the first column
+
+  var range = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1); // Search IDs in the first column
+  var idValues = range.getValues();
+
+  for (var i = 0; i < idValues.length; i++) {
+    if (idValues[i][0] == id) {
+      var rowRange = sheet.getRange(i + 2, 1, 1, rowData.length);
+      rowRange.setValues([rowData]); // Update row if id matches
+      return;
+    }
+  }
+
+  // If id doesn't exist, append the new row
+  sheet.appendRow(rowData);
+}
+
+function extractCustomField(customFields, fieldId) {
+  if (!customFields) return null;
+  for (var i = 0; i < customFields.length; i++) {
+    if (customFields[i].id === fieldId) {
+      return customFields[i].value;
+    }
+  }
+  return null;
+}
+
+function extractQuoteNumber(quoteId) {
+  if (!quoteId || !Array.isArray(quoteId)) {
+    return null;
+  }
+
+  const firstElement = quoteId[0];
+  if (typeof firstElement === 'string') {
+    const match = firstElement.match(/\[(\d+)\]/);
+    if (match && match.length > 1) {
+      return match[1];
+    }
+  }
+
+  return null;
+}
