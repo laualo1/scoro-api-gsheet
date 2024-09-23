@@ -2,10 +2,9 @@ function fetchScoroData() {
   var companyName = 'peripherydigital';
   var apiKey = 'ScoroAPI_2d9e9c9f36a0a48'; // Replace with your actual API key
 
-  // Get today's date and format
+  // Set the start date as 1st September 2024
+  var fromDate = '2024-09-01';
   var today = new Date();
-  var thirtyDaysAgo = new Date(today.getTime() - (30 * 24 * 60 * 60 * 1000)); // 30-day window
-  var fromDate = Utilities.formatDate(thirtyDaysAgo, 'UTC', "yyyy-MM-dd");
   var toDate = Utilities.formatDate(today, 'UTC', "yyyy-MM-dd");
 
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Aggregate');
@@ -13,13 +12,17 @@ function fetchScoroData() {
     sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet('Aggregate');
   }
 
+  // Clear the existing data (except headers)
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).clear();
+  }
+
   // Define headers (ensure this only runs once, not on every fetch)
   if (sheet.getLastRow() === 0) {
     var headers = [
       'id', 'doc_no', 'doc_date', 'supplier', 'supplier_id', 'project_name', 'quote_no', 'total_sum',
-      'Media Plan', 'Consolidated Client', 'Retainer / Not', 'source', 
-      'line_id', 'product_id', 'product_name', 'line_sum', 'price', 'amount', 'discount', 'vat', 'comment',
-      'product_group' // New column for product group
+      'Media Plan', 'Consolidated Client', 'Retainer / Not', 'source', // Added source indicator
+      'line_id', 'product_id', 'product_name', 'line_sum', 'price', 'amount', 'discount', 'vat', 'comment'
     ];
     sheet.appendRow(headers);
   }
@@ -29,9 +32,6 @@ function fetchScoroData() {
 
   // Fetch and update purchase orders
   fetchAndProcessScoroData(sheet, 'purchaseOrder', companyName, apiKey, fromDate, toDate);
-
-  // Fetch and update quotes and product groups
-  fetchQuotesAndProductGroups(sheet, companyName, apiKey);
 }
 
 function fetchAndProcessScoroData(sheet, source, companyName, apiKey, fromDate, toDate) {
@@ -100,7 +100,7 @@ function fetchScoroDataFromUrl(sheet, source, companyName, apiKey, fromDate, toD
         if (item.lines) {
           parseLinesColumn(item.lines, baseRow, sheet);
         } else {
-          insertOrUpdateRow(sheet, baseRow.concat([''])); // If no lines exist
+          sheet.appendRow(baseRow.concat(['']));
         }
       });
 
@@ -115,38 +115,6 @@ function fetchScoroDataFromUrl(sheet, source, companyName, apiKey, fromDate, toD
   }
 }
 
-function fetchQuotesAndProductGroups(sheet, companyName, apiKey) {
-  // Fetch quotes
-  var quoteData = fetchScoroDataFromUrl(sheet, 'quotes', companyName, apiKey, '', '', 1, 50);
-  
-  // Fetch product groups
-  var productGroupData = fetchScoroDataFromUrl(sheet, 'productGroups', companyName, apiKey, '', '', 1, 50);
-
-  // Map quotes and product groups to aggregate the data
-  mapQuotesAndProductGroups(sheet, quoteData, productGroupData);
-}
-
-function mapQuotesAndProductGroups(sheet, quoteData, productGroupData) {
-  var rows = sheet.getDataRange().getValues();
-
-  rows.forEach(function(row, rowIndex) {
-    var quoteId = row[5]; // Assuming quote_id is in the 5th column
-    var productId = row[12]; // Assuming product_id is in the 12th column
-
-    // Match the quote_no using quote_id
-    var quoteMatch = quoteData.data.find(q => q.id === quoteId);
-    if (quoteMatch) {
-      sheet.getRange(rowIndex + 1, 7).setValue(quoteMatch.no); // Update quote_no (7th column)
-    }
-
-    // Match the product group using product_id
-    var productMatch = productGroupData.data.find(pg => pg.id === productId);
-    if (productMatch) {
-      sheet.getRange(rowIndex + 1, 20).setValue(productMatch.name); // Update product_group (20th column)
-    }
-  });
-}
-
 function parseLinesColumn(linesData, baseRow, sheet) {
   try {
     var parsedData = Array.isArray(linesData) ? linesData : JSON.parse(linesData);
@@ -157,30 +125,12 @@ function parseLinesColumn(linesData, baseRow, sheet) {
       ];
 
       var finalRow = baseRow.concat(row);
-      insertOrUpdateRow(sheet, finalRow);
+      sheet.appendRow(finalRow);
     });
 
   } catch (e) {
     Logger.log('Error parsing lines column: ' + e.toString());
   }
-}
-
-function insertOrUpdateRow(sheet, rowData) {
-  var id = rowData[0]; // Assuming 'id' is the first column
-
-  var range = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1); // Search IDs in the first column
-  var idValues = range.getValues();
-
-  for (var i = 0; i < idValues.length; i++) {
-    if (idValues[i][0] == id) {
-      var rowRange = sheet.getRange(i + 2, 1, 1, rowData.length);
-      rowRange.setValues([rowData]); // Update row if id matches
-      return;
-    }
-  }
-
-  // If id doesn't exist, append the new row
-  sheet.appendRow(rowData);
 }
 
 function extractCustomField(customFields, fieldId) {
