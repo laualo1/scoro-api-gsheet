@@ -3,7 +3,7 @@ function fetchScoroData() {
   var apiKey = 'ScoroAPI_2d9e9c9f36a0a48'; // Replace with your actual API key
 
   // Set the start date as 1st September 2024
-  var fromDate = '2024-09-01';
+  var fromDate = '2024-09-26';
   var today = new Date();
   var toDate = Utilities.formatDate(today, 'UTC', "yyyy-MM-dd");
 
@@ -86,8 +86,7 @@ function fetchScoroDataFromUrl(sheet, source, companyName, apiKey, fromDate, toD
       items.forEach(function(item) {
         var baseRow = [
           item.id, item.no, item.date,
-          source === 'invoice' ? item.client_name : item.company_name,
-          source === 'invoice' ? item.client_id : item.company_id,
+          '', '', // Placeholder for supplier_name and supplier_id
           item.project_name,
           source === 'invoice' ? extractQuoteNumber(item.quote_id) : item.quote_id,
           item.sum,
@@ -97,10 +96,19 @@ function fetchScoroDataFromUrl(sheet, source, companyName, apiKey, fromDate, toD
           source
         ];
 
-        if (item.lines) {
-          parseLinesColumn(item.lines, baseRow, sheet);
-        } else {
-          sheet.appendRow(baseRow.concat(['']));
+        if (source === 'invoice' && item.lines) {
+          // For invoices, extract supplier from each line item
+          parseLinesForSupplier(item.lines, baseRow, sheet);
+        } else if (source === 'purchaseOrder') {
+          // For purchase orders, extract supplier at the document level
+          baseRow[3] = item.company_name;
+          baseRow[4] = item.company_id;
+
+          if (item.lines) {
+            parseLinesColumn(item.lines, baseRow, sheet);
+          } else {
+            sheet.appendRow(baseRow.concat(['']));
+          }
         }
       });
 
@@ -112,6 +120,24 @@ function fetchScoroDataFromUrl(sheet, source, companyName, apiKey, fromDate, toD
   } catch (e) {
     Logger.log('Error fetching data from ' + url + ': ' + e.toString());
     return false; // Stop fetching on error
+  }
+}
+
+function parseLinesForSupplier(linesData, baseRow, sheet) {
+  try {
+    var parsedData = Array.isArray(linesData) ? linesData : JSON.parse(linesData);
+
+    parsedData.forEach(function(lineItem) {
+      var lineRow = baseRow.slice(); // Clone the base row
+      lineRow[3] = lineItem.supplier_name || ''; // Insert supplier name into the existing supplier column
+      lineRow[4] = lineItem.supplier_id || '';   // Insert supplier ID into the existing supplier_id column
+
+      // Continue processing the line items
+      parseLinesColumn([lineItem], lineRow, sheet);
+    });
+
+  } catch (e) {
+    Logger.log('Error parsing lines for supplier: ' + e.toString());
   }
 }
 
@@ -144,17 +170,17 @@ function extractCustomField(customFields, fieldId) {
 }
 
 function extractQuoteNumber(quoteId) {
-  if (!quoteId || !Array.isArray(quoteId)) {
-    return null;
-  }
-
-  const firstElement = quoteId[0];
-  if (typeof firstElement === 'string') {
-    const match = firstElement.match(/\[(\d+)\]/);
-    if (match && match.length > 1) {
-      return match[1];
+  // Ensure quoteId is an array and has at least one element
+  if (quoteId && Array.isArray(quoteId) && quoteId.length > 0) {
+    const firstElement = quoteId[0]; // Get the first element
+    if (typeof firstElement === 'string') {
+      const match = firstElement.match(/\[(\d+)\]/); // Match the number inside brackets
+      if (match && match[1]) {
+        return match[1]; // Return the numeric value
+      }
+    } else if (typeof firstElement === 'number') {
+      return firstElement.toString(); // Return the number directly if it's not inside a string
     }
   }
-
-  return null;
+  return null; // Return null if no valid quote number found
 }
