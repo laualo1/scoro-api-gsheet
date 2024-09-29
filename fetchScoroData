@@ -3,13 +3,13 @@ function fetchScoroData() {
   var apiKey = 'ScoroAPI_2d9e9c9f36a0a48'; // Replace with your actual API key
 
   // Set the start date as 1st September 2024
-  var fromDate = '2024-09-26';
+  var fromDate = '2024-09-27';
   var today = new Date();
   var toDate = Utilities.formatDate(today, 'UTC', "yyyy-MM-dd");
 
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Aggregate');
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Aggregate_7D');
   if (!sheet) {
-    sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet('Aggregate');
+    sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet('Aggregate_7D');
   }
 
   // Clear the existing data (except headers)
@@ -20,8 +20,8 @@ function fetchScoroData() {
   // Define headers (ensure this only runs once, not on every fetch)
   if (sheet.getLastRow() === 0) {
     var headers = [
-      'id', 'doc_no', 'doc_date', 'supplier', 'supplier_id', 'project_name', 'quote_no', 'total_sum',
-      'Media Plan', 'Consolidated Client', 'Retainer / Not', 'source', // Added source indicator
+      'id', 'doc_no', 'doc_date', 'supplier', 'supplier_id', 'project_name', 'quote_no', 'total_sum', 
+      'description','Media Plan', 'Consolidated Client', 'Retainer / Not', 'Account Lead', 'source', 
       'line_id', 'product_id', 'product_name', 'line_sum', 'price', 'amount', 'discount', 'vat', 'comment'
     ];
     sheet.appendRow(headers);
@@ -84,17 +84,21 @@ function fetchScoroDataFromUrl(sheet, source, companyName, apiKey, fromDate, toD
       var items = data.data;
 
       items.forEach(function(item) {
-        var baseRow = [
-          item.id, item.no, item.date,
-          '', '', // Placeholder for supplier_name and supplier_id
-          item.project_name,
-          source === 'invoice' ? extractQuoteNumber(item.quote_id) : item.quote_id,
-          item.sum,
-          extractCustomField(item.custom_fields, 'c_mediaplan'),
-          extractCustomField(item.custom_fields, 'c_consolidatedclient'),
-          extractCustomField(item.custom_fields, 'c_retainernot'),
-          source
-        ];
+      var baseRow = [
+        item.id, 
+        item.no, 
+        item.date,
+        '', '', // Placeholder for supplier_name and supplier_id
+        item.project_name,
+        source === 'invoice' ? extractQuoteNumber(item.quote_id) : item.quote_id,
+        item.sum,
+        item.description,
+        extractCustomField(item.custom_fields, 'c_mediaplan'),
+        extractCustomField(item.custom_fields, 'c_consolidatedclient'),
+        extractCustomField(item.custom_fields, 'c_retainernot'),
+        extractCustomField(item.custom_fields, 'c_accountlead'), 
+        source
+      ];
 
         if (source === 'invoice' && item.lines) {
           // For invoices, extract supplier from each line item
